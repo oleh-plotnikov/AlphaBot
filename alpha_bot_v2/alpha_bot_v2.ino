@@ -1,34 +1,368 @@
-#include <Adafruit_SSD1306.h>
+#include <TRSensors.h>          //< Line sensors driver
+#include <Wire.h>               //< IO extender driver
 
-#define OLED_RESET 9
-#define OLED_SA0   8
+// Motor definitions
+#define PWMA   (6)   //Left Motor Speed pin (ENA)
+#define AIN2   (A0)  //Motor-L forward (IN2).
+#define AIN1   (A1)  //Motor-L backward (IN1)
+#define PWMB   (5)   //Right Motor Speed pin (ENB)
+#define BIN1   (A2)  //Motor-R forward (IN3)
+#define BIN2   (A3)  //Motor-R backward (IN4)
 
-Adafruit_SSD1306 display(OLED_RESET, OLED_SA0);
+// Line sensors definitions
+#define NUM_SENSORS   (5)
 
+// IO definitions
+#define IO_I2C_ADDR        (0x20)
+#define IO_MASK_BEEP_ON    (0xDF)
+#define IO_MASK_BEEP_OFF   (0x20)
+#define IO_MASK_JOY_UP     (0xFE)
+#define IO_MASK_JOY_DOWN   (0xF7)
+#define IO_MASK_JOY_LEFT   (0xFB)
+#define IO_MASK_JOY_RIGHT  (0xFD)
+#define IO_MASK_JOY_CENTER (0xEF)
+#define IO_MASK_DEFAULT    (0xE0)  //< Beep off, joystick released
+#define IO_MASK_RESET      (0xFF)  //< Reset IO state
+
+// Types declaration
+/**
+ * @brief PID controller description
+ */
+typedef struct PID_descr
+{
+  const  int K_P;    // proportional gain
+  const  int K_I;    // integral gain
+  const  int K_D;    // derivative gain
+  const  int OUT_MAX;  // maximal output
+  long      integral; // integral value
+  int       last_err; // last error value
+} PID_descr_t;
+
+/**
+ * @brief Robot states
+ */
+typedef enum
+{
+  STATE_SETUP,
+  STATE_CALIBRATION,
+  STATE_WAIT_START,
+  STATE_GO,
+  STATE_STOP,
+  STATE_MAKE_DECISION,
+  STATE_FINISH
+} Robot_state_t;
+
+
+TRSensors trs = TRSensors();
+unsigned int line_sensor_buffer[NUM_SENSORS];
+static PID_descr_t PID_gear = {20, 10000, 10, 80, 0, 0};
+static Robot_state_t robot_state = STATE_SETUP;
+
+// Support functions
+void calibration(void);
+void turn(unsigned char dir);
+unsigned char select_turn(unsigned char found_left, unsigned char found_straight, unsigned char found_right);
+void SetSpeeds(int left,int right);
+void PCF8574Write(byte data);
+byte PCF8574Read();
+bool is_button_pressed(byte button_mask);
+void beep(unsigned long duration_ms);
+
+// Loop functions
+int PID_control(PID_descr_t* ptr_PID, int current, int target, bool reset);
+
+// Setup board
 void setup()
 {
   delay(1000);
-
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
-  // init done
-  
-  // Show image buffer on the display hardware.
-  // Since the buffer is intialized with an Adafruit splashscreen
-  // internally, this will display the spxdd d lashscreen.
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.setCursor(15,0);
-  display.println("Alpha v2");
-  display.setCursor(10,25);
-  display.println("Test");
-  display.setTextSize(1);
-  display.setCursor(10,55);
-  display.println("Press to calibrate");
-  display.display();
-  
+  Serial.begin(115200);
+  Serial.println("SigmaSoftware");
+  Wire.begin();
+  pinMode(PWMA,OUTPUT);                     
+  pinMode(AIN2,OUTPUT);      
+  pinMode(AIN1,OUTPUT);
+  pinMode(PWMB,OUTPUT);       
+  pinMode(AIN1,OUTPUT);     
+  pinMode(AIN2,OUTPUT);  
+  SetSpeeds(0,0);
+  robot_state = STATE_SETUP;
 }
 
+// Main loop
 void loop()
 {
+  switch (robot_state)
+  {
+    case STATE_SETUP:
+    {
+      if (is_button_pressed(IO_MASK_JOY_CENTER))
+      {
+        robot_state = STATE_CALIBRATION;
+      }
+      break;
+    }
+    case STATE_CALIBRATION:
+    {
+      delay(500);
+      calibration();
+      robot_state = STATE_WAIT_START;
+      break;
+    }
+    case STATE_WAIT_START:
+    {
+      if (is_button_pressed(IO_MASK_JOY_CENTER))
+      {
+        // Reset current PID state and start to move
+        PID_control(&PID_gear, 0, 0, true);
+        delay(500);
+        robot_state = STATE_GO;
+      }
+      break;
+    }
+    case STATE_GO:
+    {
+      // Read line
+      int power = PID_control(&PID_gear, trs.readLine(line_sensor_buffer), 2000, false);
+      //Serial.println(power);
+      // Check crossroad
+      if ((line_sensor_buffer[0] > 950 || line_sensor_buffer[4] > 950) ||
+          (line_sensor_buffer[1] + line_sensor_buffer[2] + line_sensor_buffer[3]) < 300)
+      {
+		char b[2];
+		String str;
+		str=String(line_sensor_buffer[0]);
+		str.toCharArray(b,2);
+
+		Serial.write(b);	
+
+		str=String(line_sensor_buffer[1]);
+		str.toCharArray(b,2);
+
+		Serial.write(b);	
+
+		str=String(line_sensor_buffer[2]);
+		str.toCharArray(b,2);
+
+		Serial.write(b);	
+
+
+		str=String(line_sensor_buffer[3]);
+		str.toCharArray(b,2);
+
+		Serial.write(b);	
+
+
+		str=String(line_sensor_buffer[4]);
+		str.toCharArray(b,2);
+
+		Serial.write(b);	
+
+
+        SetSpeeds(0 , 0);
+        robot_state = STATE_MAKE_DECISION;
+      }
+      else if (power < 0)
+      {
+        SetSpeeds(PID_gear.OUT_MAX - power, PID_gear.OUT_MAX);
+      }
+      else
+      {
+        SetSpeeds(PID_gear.OUT_MAX, PID_gear.OUT_MAX + power);
+      }
+      break;
+    }
+    case STATE_STOP:
+    {
+      break;
+    }
+    case STATE_MAKE_DECISION:
+    {
+
+      //robot_state = STATE_WAIT_START;
+      break;
+    }
+    default:
+    {
+      robot_state = STATE_SETUP;
+      break;
+    }
+  }
+}
+
+/**
+ * @brief PID control implementation
+ * 
+ * @param ptr_PID .. pointer on PID settings
+ * @param current .. current value
+ * @param target  .. target value 
+ * @param reset_I .. reset PID integrator
+ * @return Output value of PID control
+ */
+int PID_control(PID_descr_t* ptr_PID, int current, int target, bool reset_I)
+{
+  int out = 0;
+  // Input data verification
+  if (NULL == ptr_PID)
+  {
+    return out;
+  }
+  // Reset PID state
+  if (reset_I)
+  {
+    ptr_PID->integral = 0;
+    ptr_PID->last_err = 0;
+  }
+
+  // PID step calculation
+  int  P = 0;
+  long I = ptr_PID->integral;
+  int  D = 0;
+  P = target - current;
+  I += P;
+  D = P - ptr_PID->last_err;
+  // Out calculation
+  out = P / ptr_PID->K_P + I / ptr_PID->K_I + D * ptr_PID->K_D;
+
+  // Check limits
+  if (out > ptr_PID->OUT_MAX)  out = ptr_PID->OUT_MAX;
+  if (out < -ptr_PID->OUT_MAX) out = -ptr_PID->OUT_MAX;
+
+  // Save PID state for next step
+  ptr_PID->last_err = P;
+  ptr_PID->integral = I;
+
+  return out;
+}
+
+/**
+ * @brief Setup TRS sensors
+ */
+void calibration(void)
+{
+  // @TODO: Rework calobration approach
+  for (int i = 0; i < 100; i++)
+  {
+    if (i < 25 || i >= 75)
+    {  
+      SetSpeeds(80, -80);
+    }
+    else
+    { 
+      SetSpeeds(-80, 80);
+    }
+    trs.calibrate();
+  }
+  SetSpeeds(0 , 0);
+}
+
+// Code to perform various types of turns according to the parameter dir,
+// which should be 'L' (left), 'R' (right), 'S' (straight), or 'B' (back).
+// The delays here had to be calibrated for the 3pi's motors.
+void turn(unsigned char dir)
+{
+  switch(dir)
+  {
+  case 'L':
+    // Turn left.
+    SetSpeeds(-100, 100);
+    delay(190);
+    break;
+  case 'R':
+    // Turn right.
+    SetSpeeds(100, -100);
+    delay(190);
+    break;
+  case 'B':
+    // Turn around.
+    SetSpeeds(100, -100);
+    delay(400);
+    break;
+  case 'S':
+    // Don't do anything!
+    break;
+  }
+  SetSpeeds(0, 0);
+
+  Serial.write(dir);
+  Serial.println();
+}
+
+// This function decides which way to turn during the learning phase of
+// maze solving.  It uses the variables found_left, found_straight, and
+// found_right, which indicate whether there is an exit in each of the
+// three directions, applying the "left hand on the wall" strategy.
+unsigned char select_turn(unsigned char found_left, unsigned char found_straight, unsigned char found_right)
+{
+  // Make a decision about how to turn.  The following code
+  // implements a left-hand-on-the-wall strategy, where we always
+  // turn as far to the left as possible.
+  if (found_left)
+    return 'L';
+  else if (found_straight)
+    return 'S';
+  else if (found_right)
+    return 'R';
+  else
+    return 'B';
+}
+
+void SetSpeeds(int left,int right)
+{
+  if(left < 0)
+  {
+    digitalWrite(AIN1,HIGH);
+    digitalWrite(AIN2,LOW);
+    analogWrite(PWMA,-left);      
+  }
+  else
+  {
+    digitalWrite(AIN1,LOW); 
+    digitalWrite(AIN2,HIGH);
+    analogWrite(PWMA,left);  
+  }
+  
+  if(right < 0)
+  {
+    digitalWrite(BIN1,HIGH);
+    digitalWrite(BIN2,LOW);
+    analogWrite(PWMB,-right);      
+  }
+  else
+  {
+    digitalWrite(BIN1,LOW); 
+    digitalWrite(BIN2,HIGH);
+    analogWrite(PWMB,right);  
+  }
+}
+
+void PCF8574Write(byte data)
+{
+  Wire.beginTransmission(IO_I2C_ADDR);
+  Wire.write(data);
+  Wire.endTransmission(); 
+}
+
+byte PCF8574Read()
+{
+  int data = -1;
+  Wire.requestFrom(IO_I2C_ADDR, 1);
+  if(Wire.available()) {
+    data = Wire.read();
+  }
+  return static_cast<byte>(data);
+}
+
+bool is_button_pressed(byte button_mask)
+{
+  byte reg_value = IO_MASK_RESET;
+  PCF8574Write(reg_value);
+  reg_value = PCF8574Read() | IO_MASK_DEFAULT;
+  return reg_value == button_mask;
+}
+
+void beep(unsigned long duration_ms)
+{
+  PCF8574Write(IO_MASK_BEEP_ON);
+  delay(duration_ms);
+  PCF8574Write(IO_MASK_BEEP_OFF);
 }
