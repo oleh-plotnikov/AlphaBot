@@ -76,7 +76,6 @@ void setup()
 {
   delay(1000);
   Serial.begin(115200);
-  Serial.println("SigmaSoftware");
   Wire.begin();
   pinMode(PWMA,OUTPUT);                     
   pinMode(AIN2,OUTPUT);      
@@ -85,7 +84,35 @@ void setup()
   pinMode(AIN1,OUTPUT);     
   pinMode(AIN2,OUTPUT);  
   SetSpeeds(0,0);
+
+  while(!is_button_pressed(IO_MASK_JOY_CENTER))
+  {
+    delay(10);
+  }
   robot_state = STATE_SETUP;
+  Serial.println("Bot is Ready to Start!!!");
+  Serial.println("Send: ""start"" to calibrate");
+}
+
+int wait_command(const char* str)
+{
+  String comdata = "";
+  while (Serial.available() > 0)  
+  {
+    comdata += char(Serial.read());
+    delay(2);
+  }
+  if (comdata.length() > 0)
+  {
+    Serial.println(comdata);
+    const char* command = comdata.c_str();
+    if(strcmp(command, str) == 0)          //Forward
+    {
+      return 1;
+    }
+  }
+  comdata = "";
+  return 0;
 }
 
 // Main loop
@@ -95,7 +122,7 @@ void loop()
   {
     case STATE_SETUP:
     {
-      if (is_button_pressed(IO_MASK_JOY_CENTER))
+      if (wait_command("Waveshare"))
       {
         robot_state = STATE_CALIBRATION;
       }
@@ -105,6 +132,7 @@ void loop()
     {
       delay(500);
       calibration();
+      
       robot_state = STATE_WAIT_START;
       break;
     }
@@ -121,43 +149,20 @@ void loop()
     }
     case STATE_GO:
     {
+      follow_segment();
+      /*
+      int power = 0;
       // Read line
-      int power = PID_control(&PID_gear, trs.readLine(line_sensor_buffer), 2000, false);
-      //Serial.println(power);
+        power = PID_control(&PID_gear, trs.readLine(line_sensor_buffer), 2000, false);
+
       // Check crossroad
       if ((line_sensor_buffer[0] > 950 || line_sensor_buffer[4] > 950) ||
           (line_sensor_buffer[1] + line_sensor_buffer[2] + line_sensor_buffer[3]) < 300)
       {
-		char b[2];
-		String str;
-		str=String(line_sensor_buffer[0]);
-		str.toCharArray(b,2);
-
-		Serial.write(b);	
-
-		str=String(line_sensor_buffer[1]);
-		str.toCharArray(b,2);
-
-		Serial.write(b);	
-
-		str=String(line_sensor_buffer[2]);
-		str.toCharArray(b,2);
-
-		Serial.write(b);	
-
-
-		str=String(line_sensor_buffer[3]);
-		str.toCharArray(b,2);
-
-		Serial.write(b);	
-
-
-		str=String(line_sensor_buffer[4]);
-		str.toCharArray(b,2);
-
-		Serial.write(b);	
-
-
+     //   while(1)
+     //   {
+     //     print_sensor();
+     //   }
         SetSpeeds(0 , 0);
         robot_state = STATE_MAKE_DECISION;
       }
@@ -170,6 +175,7 @@ void loop()
         SetSpeeds(PID_gear.OUT_MAX, PID_gear.OUT_MAX + power);
       }
       break;
+      */
     }
     case STATE_STOP:
     {
@@ -187,6 +193,17 @@ void loop()
       break;
     }
   }
+}
+
+void print_sensor()
+{
+  trs.readLine(line_sensor_buffer);
+  Serial.println(line_sensor_buffer[0]);
+  Serial.println(line_sensor_buffer[1]);
+  Serial.println(line_sensor_buffer[2]);
+  Serial.println(line_sensor_buffer[3]);
+  Serial.println(line_sensor_buffer[4]);
+  delay(1000);
 }
 
 /**
@@ -240,19 +257,52 @@ int PID_control(PID_descr_t* ptr_PID, int current, int target, bool reset_I)
 void calibration(void)
 {
   // @TODO: Rework calobration approach
-  for (int i = 0; i < 100; i++)
+  for (int i = 0; i < 350; i++)
   {
-    if (i < 25 || i >= 75)
+    if (i < 100 || i >= 250)
     {  
-      SetSpeeds(80, -80);
+      SetSpeeds(70, -70);
     }
     else
     { 
-      SetSpeeds(-80, 80);
+      SetSpeeds(-70, 70);
     }
     trs.calibrate();
   }
+  
+  SetSpeeds(-40, 40);
+  int proportional = 1;
+  line_sensor_buffer[2] = 100;
+  while(proportional > 0 || proportional < 0)
+  {
+    unsigned int position = trs.readLine(line_sensor_buffer);
+    proportional = ((int)position) - 2000;
+  }
   SetSpeeds(0 , 0);
+
+  Serial.println("------------------");
+  Serial.println("Calibrated");
+  
+  uint8_t count = 0;
+  Serial.print("MAX: ");
+  while(count < NUM_SENSORS)
+  {
+    Serial.print(" ");
+    Serial.print(trs.calibratedMin[count]);
+    count++;
+  }
+  Serial.println("");
+
+  count = 0;
+  Serial.print("MIN: ");
+  while(count < NUM_SENSORS)
+  {
+    Serial.print(" ");
+    Serial.print(trs.calibratedMax[count]);
+    count++;
+  }
+  Serial.println("");
+  Serial.println("------------------");
 }
 
 // Code to perform various types of turns according to the parameter dir,
@@ -365,4 +415,79 @@ void beep(unsigned long duration_ms)
   PCF8574Write(IO_MASK_BEEP_ON);
   delay(duration_ms);
   PCF8574Write(IO_MASK_BEEP_OFF);
+}
+
+unsigned long lasttime = 0;
+void follow_segment()
+{
+  int last_proportional = 0;
+  long integral=0;
+
+  while(1)
+  {
+    // Normally, we will be following a line.  The code below is
+    // similar to the 3pi-linefollower-pid example, but the maximum
+    // speed is turned down to 60 for reliability.
+
+    // Get the position of the line.
+    unsigned int position = trs.readLine(line_sensor_buffer);
+
+    // The "proportional" term should be 0 when we are on the line.
+    int proportional = ((int)position) - 2000;
+
+    // Compute the derivative (change) and integral (sum) of the
+    // position.
+    int derivative = proportional - last_proportional;
+    integral += proportional;
+
+    // Remember the last position.
+    last_proportional = proportional;
+
+    // Compute the difference between the two motor power settings,
+    // m1 - m2.  If this is a positive number the robot will turn
+    // to the left.  If it is a negative number, the robot will
+    // turn to the right, and the magnitude of the number determines
+    // the sharpness of the turn.
+    int power_difference = proportional/20 + integral/10000 + derivative*10;
+
+    // Compute the actual motor settings.  We never set either motor
+    // to a negative value.
+    const int maximum = 150; // the maximum speed
+    if (power_difference > maximum)
+      power_difference = maximum;
+    if (power_difference < -maximum)
+      power_difference = - maximum;
+
+    if (power_difference < 0)
+    {
+      analogWrite(PWMA,maximum + power_difference);
+      analogWrite(PWMB,maximum);
+    }
+    else
+    {
+      analogWrite(PWMA,maximum);
+      analogWrite(PWMB,maximum - power_difference);
+    }
+
+    // We use the inner three sensors (1, 2, and 3) for
+    // determining whether there is a line straight ahead, and the
+    // sensors 0 and 4 for detecting lines going to the left and
+    // right.
+   if(millis() - lasttime >100)
+   {
+    if (line_sensor_buffer[1] < 150 && line_sensor_buffer[2] < 150 && line_sensor_buffer[3] < 150)
+    {
+      // There is no line visible ahead, and we didn't see any
+      // intersection.  Must be a dead end.
+    //  SetSpeeds(0,0);
+      return;
+    }
+    else if (line_sensor_buffer[0] > 600 || line_sensor_buffer[4] > 600)
+    {
+      // Found an intersection.
+    //  SetSpeeds(0, 0);
+      return;
+    }
+   }
+  }
 }
