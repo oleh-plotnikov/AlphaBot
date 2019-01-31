@@ -58,6 +58,10 @@ unsigned int line_sensor_buffer[NUM_SENSORS];
 static PID_descr_t PID_gear = {20, 10000, 10, 80, 0, 0};
 static Robot_state_t robot_state = STATE_SETUP;
 
+char path[100] = "";
+unsigned char path_length = 0; // the length of the path
+
+
 // Support functions
 void calibration(void);
 void turn(unsigned char dir);
@@ -67,6 +71,7 @@ void PCF8574Write(byte data);
 byte PCF8574Read();
 bool is_button_pressed(byte button_mask);
 void beep(unsigned long duration_ms);
+bool wait_command(const char* str);
 
 // Loop functions
 int PID_control(PID_descr_t* ptr_PID, int current, int target, bool reset);
@@ -94,27 +99,6 @@ void setup()
   Serial.println("Send: ""start"" to calibrate");
 }
 
-int wait_command(const char* str)
-{
-  String comdata = "";
-  while (Serial.available() > 0)  
-  {
-    comdata += char(Serial.read());
-    delay(2);
-  }
-  if (comdata.length() > 0)
-  {
-    Serial.println(comdata);
-    const char* command = comdata.c_str();
-    if(strcmp(command, str) == 0)          //Forward
-    {
-      return 1;
-    }
-  }
-  comdata = "";
-  return 0;
-}
-
 // Main loop
 void loop()
 {
@@ -138,7 +122,7 @@ void loop()
     }
     case STATE_WAIT_START:
     {
-      if (is_button_pressed(IO_MASK_JOY_CENTER))
+      if (wait_command("Waveshare"))
       {
         // Reset current PID state and start to move
         PID_control(&PID_gear, 0, 0, true);
@@ -150,32 +134,8 @@ void loop()
     case STATE_GO:
     {
       follow_segment();
-      /*
-      int power = 0;
-      // Read line
-        power = PID_control(&PID_gear, trs.readLine(line_sensor_buffer), 2000, false);
-
-      // Check crossroad
-      if ((line_sensor_buffer[0] > 950 || line_sensor_buffer[4] > 950) ||
-          (line_sensor_buffer[1] + line_sensor_buffer[2] + line_sensor_buffer[3]) < 300)
-      {
-     //   while(1)
-     //   {
-     //     print_sensor();
-     //   }
-        SetSpeeds(0 , 0);
-        robot_state = STATE_MAKE_DECISION;
-      }
-      else if (power < 0)
-      {
-        SetSpeeds(PID_gear.OUT_MAX - power, PID_gear.OUT_MAX);
-      }
-      else
-      {
-        SetSpeeds(PID_gear.OUT_MAX, PID_gear.OUT_MAX + power);
-      }
+      robot_state = STATE_MAKE_DECISION;
       break;
-      */
     }
     case STATE_STOP:
     {
@@ -183,8 +143,55 @@ void loop()
     }
     case STATE_MAKE_DECISION:
     {
-
-      //robot_state = STATE_WAIT_START;
+      unsigned char found_left = 0;
+      unsigned char found_straight = 0;
+      unsigned char found_right = 0;
+  
+      // Now read the sensors and check the intersection type.
+      trs.readLine(line_sensor_buffer);
+  
+      // Check for left and right exits.
+      if (line_sensor_buffer[0] > 600)
+        found_left = 1;
+      if (line_sensor_buffer[4] > 600)
+        found_right = 1;
+  
+      // Drive straight a bit more - this is enough to line up our
+      // wheels with the intersection.
+      SetSpeeds(20, 20);
+      delay(100);
+  
+      // Check for a straight exit.
+      trs.readLine(line_sensor_buffer);
+      if (line_sensor_buffer[1] > 600 || line_sensor_buffer[2] > 600 || line_sensor_buffer[3] > 600)
+        found_straight = 1;
+  
+      // Check for the ending spot.
+      // If all three middle sensors are on dark black, we have
+      // solved the maze.
+      if (line_sensor_buffer[1] > 600 && line_sensor_buffer[2] > 600 && line_sensor_buffer[3] > 600)
+      {
+        SetSpeeds(0, 0);
+		while(1)
+	    {
+			delay(1000);
+		};
+        break;
+      }
+  
+      // Intersection identification is complete.
+      // If the maze has been solved, we can follow the existing
+      // path.  Otherwise, we need to learn the solution.
+      unsigned char dir = select_turn(found_left, found_straight, found_right);
+  
+      // Make the turn indicated by the path.
+      turn(dir);
+      robot_state = STATE_GO;
+      
+	  path[path_length] = dir;
+      path_length++;
+	  
+	  simplify_path();
       break;
     }
     default:
@@ -193,6 +200,54 @@ void loop()
       break;
     }
   }
+}
+
+void simplify_path()
+{
+  // only simplify the path if the second-to-last turn was a 'B'
+  if (path_length < 3 || path[path_length-2] != 'B')
+    return;
+
+  int total_angle = 0;
+  int i;
+  for (i = 1; i <= 3; i++)
+  {
+    switch (path[path_length - i])
+    {
+    case 'R':
+      total_angle += 90;
+      break;
+    case 'L':
+      total_angle += 270;
+      break;
+    case 'B':
+      total_angle += 180;
+      break;
+    }
+  }
+
+  // Get the angle as a number between 0 and 360 degrees.
+  total_angle = total_angle % 360;
+
+  // Replace all of those turns with a single one.
+  switch (total_angle)
+  {
+  case 0:
+    path[path_length - 3] = 'S';
+    break;
+  case 90:
+    path[path_length - 3] = 'R';
+    break;
+  case 180:
+    path[path_length - 3] = 'B';
+    break;
+  case 270:
+    path[path_length - 3] = 'L';
+    break;
+  }
+
+  // The path is now two steps shorter.
+  path_length -= 2;
 }
 
 void print_sensor()
@@ -257,34 +312,42 @@ int PID_control(PID_descr_t* ptr_PID, int current, int target, bool reset_I)
 void calibration(void)
 {
   // @TODO: Rework calobration approach
-  for (int i = 0; i < 350; i++)
+  for (int i = 0; i < 100; i++)
   {
-    if (i < 100 || i >= 250)
+    if (i == 50 || i == 150)
+	{
+		SetSpeeds(0,0);
+		delay(1000);
+	}
+
+    if (i < 25 || i > 75)
     {  
-      SetSpeeds(70, -70);
+      SetSpeeds(60, -60);
     }
     else
     { 
-      SetSpeeds(-70, 70);
+      SetSpeeds(-60, 60);
     }
     trs.calibrate();
   }
-  
-  SetSpeeds(-40, 40);
+
+  SetSpeeds(0, 0);
+  delay(1000);
+  SetSpeeds(-30, 30);
   int proportional = 1;
   line_sensor_buffer[2] = 100;
-  while(proportional > 0 || proportional < 0)
+  while((proportional > 100 || proportional < -100))
   {
     unsigned int position = trs.readLine(line_sensor_buffer);
     proportional = ((int)position) - 2000;
   }
   SetSpeeds(0 , 0);
-
+  Serial.println(proportional);
   Serial.println("------------------");
   Serial.println("Calibrated");
   
   uint8_t count = 0;
-  Serial.print("MAX: ");
+  Serial.print("MIN: ");
   while(count < NUM_SENSORS)
   {
     Serial.print(" ");
@@ -294,7 +357,7 @@ void calibration(void)
   Serial.println("");
 
   count = 0;
-  Serial.print("MIN: ");
+  Serial.print("MAX: ");
   while(count < NUM_SENSORS)
   {
     Serial.print(" ");
@@ -333,8 +396,8 @@ void turn(unsigned char dir)
   }
   SetSpeeds(0, 0);
 
-  Serial.write(dir);
-  Serial.println();
+  //Serial.write(dir);
+  //Serial.println();
 }
 
 // This function decides which way to turn during the learning phase of
@@ -425,33 +488,17 @@ void follow_segment()
 
   while(1)
   {
-    // Normally, we will be following a line.  The code below is
-    // similar to the 3pi-linefollower-pid example, but the maximum
-    // speed is turned down to 60 for reliability.
-
-    // Get the position of the line.
     unsigned int position = trs.readLine(line_sensor_buffer);
 
-    // The "proportional" term should be 0 when we are on the line.
     int proportional = ((int)position) - 2000;
 
-    // Compute the derivative (change) and integral (sum) of the
-    // position.
     int derivative = proportional - last_proportional;
     integral += proportional;
 
-    // Remember the last position.
     last_proportional = proportional;
 
-    // Compute the difference between the two motor power settings,
-    // m1 - m2.  If this is a positive number the robot will turn
-    // to the left.  If it is a negative number, the robot will
-    // turn to the right, and the magnitude of the number determines
-    // the sharpness of the turn.
     int power_difference = proportional/20 + integral/10000 + derivative*10;
 
-    // Compute the actual motor settings.  We never set either motor
-    // to a negative value.
     const int maximum = 150; // the maximum speed
     if (power_difference > maximum)
       power_difference = maximum;
@@ -469,25 +516,45 @@ void follow_segment()
       analogWrite(PWMB,maximum - power_difference);
     }
 
-    // We use the inner three sensors (1, 2, and 3) for
-    // determining whether there is a line straight ahead, and the
-    // sensors 0 and 4 for detecting lines going to the left and
-    // right.
    if(millis() - lasttime >100)
    {
     if (line_sensor_buffer[1] < 150 && line_sensor_buffer[2] < 150 && line_sensor_buffer[3] < 150)
     {
-      // There is no line visible ahead, and we didn't see any
-      // intersection.  Must be a dead end.
-    //  SetSpeeds(0,0);
+//      robot_state = STATE_WAIT_START;
+//	  while(1)/
+//	  {
+//          SetSpeeds(0, 0);
+//		  delay(1000);
+//	  }
       return;
     }
     else if (line_sensor_buffer[0] > 600 || line_sensor_buffer[4] > 600)
     {
       // Found an intersection.
-    //  SetSpeeds(0, 0);
+      SetSpeeds(0, 0);
       return;
     }
    }
   }
+}
+
+bool wait_command(const char* str)
+{
+  String comdata = "";
+  while (Serial.available() > 0)  
+  {
+    comdata += char(Serial.read());
+    delay(2);
+  }
+  if (comdata.length() > 0)
+  {
+    Serial.println(comdata);
+    const char* command = comdata.c_str();
+    if(strcmp(command, str) == 0)          //Forward
+    {
+      return 1;
+    }
+  }
+  comdata = "";
+  return 0;
 }
