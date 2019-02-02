@@ -8,8 +8,7 @@
                 "C:\\Program Files (x86)\\Arduino\\libraries\\TRSensors\\**",
                 "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\libraries\\**",
                 "C:\\Program Files (x86)\\Arduino\\hardware\\tools\\avr\\avr\\include\\**",
-                "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\cores\\arduino\\**",
-                "${workspaceFolder}"
+                "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\cores\\arduino\\**"            
             ],
             "forcedInclude": [
                 "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\cores\\arduino\\Arduino.h"
