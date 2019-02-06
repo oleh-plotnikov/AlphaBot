@@ -34,20 +34,46 @@ void nimble_run()
         case STATE_CALIBRATION:
             nimble_control_calibrate();
             nimble_print_calibrated_val();
-            nimble_go_to_state(STATE_GO);
+//            nimble_go_to_state(STATE_GO);
+
+//            nimble_debug_print("Press Button", eNIMBLE_LCD);
+            //nimble_control_wait();
+
+            a = (int)nimble_control_get_position();
+ //           str = String(a);
+ //           str.toCharArray(b,5);
+//            nimble_debug_print(b, eNIMBLE_LCD);
+//            delay(20);       
+			
+			if(a >= 1900 && a <= 2100)
+			{
+			  nimble_motor_setSpeeds(0,0);
+              nimble_go_to_state(STATE_GO);
+			}
+
+//            nimble_motor_setSpeeds(255,240);
             break;
         case STATE_WAIT_START:
             break;
         case STATE_GO:
-//            nimble_debug_print("Press Button", eNIMBLE_LCD);
-            //nimble_control_wait();
-            
+		while(1)
+		{
+			follow_segment();
+
+            SetSpeeds(30, 30);
+             delay(40);
+         
+             // These variables record whether the robot has seen a line to the
+             // left, straight ahead, and right, whil examining the current
+             // intersection.
+             unsigned char found_left = 0;
+             unsigned char found_straight = 0;
+             unsigned char found_right = 0;
+
             a = (int)nimble_control_get_position();
-            str = String(a);
-            str.toCharArray(b,5);
-            nimble_debug_print(b, eNIMBLE_LCD);
-            delay(20);       
-//            nimble_motor_setSpeeds(255,240);
+		}
+
+
             break;
         case STATE_STOP:
             break;

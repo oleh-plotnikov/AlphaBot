@@ -12,6 +12,6 @@ void nimble_control_calibrate();
 unsigned int* nimble_control_get_min_ptr();
 unsigned int* nimble_control_get_max_ptr();
 unsigned int nimble_control_get_position();
-
+void follow_segment();
 
 #endif
