@@ -8,10 +8,9 @@
 
 void nimble_control_init();
 void nimble_control_wait();
-void nimble_control_calibrate();
+void nimble_control_calibrate(unsigned int speed);
 unsigned int* nimble_control_get_min_ptr();
 unsigned int* nimble_control_get_max_ptr();
-unsigned int nimble_control_get_position();
-void follow_segment();
+unsigned int nimble_control_get_position(unsigned int *sensorValues);
 
 #endif

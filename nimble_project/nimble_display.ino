@@ -33,7 +33,7 @@ void nimble_debug_print(const char c[], int type)
 }
 
 void testdrawchar(const char c[]) {
-  display.setTextSize(1);
+  display.setTextSize(2);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
   display.print(c);

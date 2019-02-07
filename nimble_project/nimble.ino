@@ -7,6 +7,7 @@
 #include "nimble_display.h"
 
 static nimble_state_t nimble_state;
+unsigned int sensorValues[NUM_SENSORS];
 
 bool nimble_go_to_state(nimble_state_t state);
 void nimble_print_calibrated_val();
@@ -24,7 +25,8 @@ void nimble_run()
     int a; 
     char b[5];
     String str;
-            
+    static unsigned int calibrate_speed = 50;
+
     switch(nimble_state)
     {
         case STATE_SETUP:
@@ -32,48 +34,51 @@ void nimble_run()
             nimble_go_to_state(STATE_CALIBRATION);
             break;
         case STATE_CALIBRATION:
-            nimble_control_calibrate();
+            nimble_control_calibrate(calibrate_speed);
             nimble_print_calibrated_val();
 //            nimble_go_to_state(STATE_GO);
 
 //            nimble_debug_print("Press Button", eNIMBLE_LCD);
             //nimble_control_wait();
 
-            a = (int)nimble_control_get_position();
- //           str = String(a);
- //           str.toCharArray(b,5);
-//            nimble_debug_print(b, eNIMBLE_LCD);
-//            delay(20);       
-			
-			if(a >= 1900 && a <= 2100)
-			{
-			  nimble_motor_setSpeeds(0,0);
-              nimble_go_to_state(STATE_GO);
-			}
+            nimble_motor_setSpeeds(35, -35);
+            
+            for(unsigned int count = 0; count < 100000; count++)
+            {
+              a = (int)nimble_control_get_position(sensorValues);
 
-//            nimble_motor_setSpeeds(255,240);
+              if(a >= 1995 && a <= 2010)
+			  {
+                nimble_motor_setSpeeds(-50, 50);
+                delay(10);
+                nimble_motor_setSpeeds(28, -28);
+                
+                a = (int)nimble_control_get_position(sensorValues);
+                if(a >= 1990 && a <= 2010)
+                {
+                  nimble_motor_setSpeeds(0,0);
+                  str = String(a);
+                  str.toCharArray(b,5);
+                  nimble_debug_print(b, eNIMBLE_LCD);
+
+                  delay(10000);
+                  while(1)
+                  {
+                    a = (int)nimble_control_get_position(sensorValues); 
+                    str = String(a);//sensorValues[0]);
+                    str.toCharArray(b,5);
+                    nimble_debug_print(b, eNIMBLE_LCD);
+                  }
+                }
+              }
+            }
+            calibrate_speed -= 5;
             break;
         case STATE_WAIT_START:
             break;
         case STATE_GO:
-		while(1)
-		{
-			follow_segment();
-
-            SetSpeeds(30, 30);
-             delay(40);
-         
-             // These variables record whether the robot has seen a line to the
-             // left, straight ahead, and right, whil examining the current
-             // intersection.
-             unsigned char found_left = 0;
-             unsigned char found_straight = 0;
-             unsigned char found_right = 0;
-
-            a = (int)nimble_control_get_position();
-		}
-
-
+            //nimble_debug_print("STOP", eNIMBLE_LCD);
+            nimble_motor_setSpeeds(0,0);
             break;
         case STATE_STOP:
             break;

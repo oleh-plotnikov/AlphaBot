@@ -222,17 +222,17 @@ void turn(unsigned char dir)
     case 'L':
       // Turn left.
       SetSpeeds(-100, 100);
-      delay(190);
+      delay(175);
       break;
     case 'R':
       // Turn right.
       SetSpeeds(100, -100);
-      delay(190);
+      delay(175); // Last correct
       break;
     case 'B':
       // Turn around.
-      SetSpeeds(72, -75);
-      delay(400);
+      SetSpeeds(75, -75);
+      delay(410); // Last correct
       break;
     case 'S':
       // Don't do anything!
