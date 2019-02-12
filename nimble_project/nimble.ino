@@ -106,12 +106,12 @@ void nimble_run()
            nimble_control_get_position(sensorValues);
         
             // Check for left and right exits.
-            if (sensorValues[0] > 600)
+            if (sensorValues[1] > 600)
             {
               found_left = 1;
 //              nimble_debug_print("FOUND LEFT", eNIMBLE_LCD);
             }
-            if (sensorValues[4] > 600)
+            if (sensorValues[3] > 600)
             {
               found_right = 1;
  //             nimble_debug_print("FOUND RIGHT", eNIMBLE_LCD);

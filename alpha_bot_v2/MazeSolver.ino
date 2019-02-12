@@ -170,7 +170,7 @@ void follow_segment()
 
     // Compute the actual motor settings.  We never set either motor
     // to a negative value.
-    const int maximum = 110; // the maximum speed
+    const int maximum = 125; // the maximum speed
     if (power_difference > maximum)
       power_difference = maximum;
     if (power_difference < -maximum)
@@ -193,7 +193,7 @@ void follow_segment()
     // right.
    if(millis() - lasttime >100)
    {
-    if (sensorValues[1] < 150 && sensorValues[2] < 150 && sensorValues[3] < 150)
+    if (sensorValues[1] < 200 && sensorValues[2] < 200 && sensorValues[3] < 200)
     {
       // There is no line visible ahead, and we didn't see any
       // intersection.  Must be a dead end.
@@ -231,8 +231,8 @@ void turn(unsigned char dir)
       break;
     case 'B':
       // Turn around.
-      SetSpeeds(75, -75);
-      delay(410); // Last correct
+      SetSpeeds(150, -150);
+      delay(220); // Last correct 310
       break;
     case 'S':
       // Don't do anything!
@@ -346,8 +346,8 @@ void loop() {
     // intersection at an angle.
     // Note that we are slowing down - this prevents the robot
     // from tipping forward too much.
-    SetSpeeds(30, 30);
-    delay(40);
+    SetSpeeds(40, 40);
+    delay(20);
 
     // These variables record whether the robot has seen a line to the
     // left, straight ahead, and right, whil examining the current

@@ -107,7 +107,7 @@ void follow_segment()
 
     // Compute the actual motor settings.  We never set either motor
     // to a negative value.
-    const int maximum = 110; // the maximum speed 110
+    const int maximum = 120; // the maximum speed 110
     if (power_difference > maximum)
       power_difference = maximum;
     if (power_difference < -maximum)
@@ -142,24 +142,12 @@ void follow_segment()
 
 unsigned char select_turn(unsigned char found_left, unsigned char found_straight, unsigned char found_right, unsigned int decision)
 {
-  if(decision == DECISION_LEFT)
   {
     if (found_left)
       return 'L';
     else if (found_straight)
       return 'S';
     else if (found_right)
-      return 'R';
-    else
-      return 'B';
-  }
-  else
-  {
-    if (found_right)
-      return 'L';
-    else if (found_straight)
-      return 'S';
-    else if (found_left)
       return 'R';
     else
       return 'B';
